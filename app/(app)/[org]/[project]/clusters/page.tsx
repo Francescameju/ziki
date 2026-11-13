@@ -45,34 +45,37 @@ export default async function ClustersPage({ params }: { params: Promise<{ org: 
       </section>
 
       {items.length ? (
-        <ul className="m-0 grid list-none gap-3 p-0 md:grid-cols-2">
+        // One list, one row per cluster, like the issue list: name and purpose on the left, who and what on the right.
+        <ul className="m-0 list-none divide-y divide-zk-border overflow-hidden rounded-[20px] border border-zk-border bg-zk-surface p-0">
           {items.map((cluster) => {
             const member = cluster.myStatus === "active";
             return (
-              <li key={cluster.id} className="flex min-w-0 flex-col gap-3 rounded-2xl border border-zk-border bg-zk-surface p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-[15px] font-bold text-zk-text">{cluster.name}</h3>
-                    <p className="mt-0.5 text-xs text-zk-muted">Active {when(cluster.lastActivityAt)}</p>
+              <li key={cluster.id} className="grid min-w-0 gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-7">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {member ? (
+                      <Link href={projectPath(project.ref, `/clusters/${cluster.id}`)} className="truncate text-[15px] font-bold text-zk-text hover:underline">{cluster.name}</Link>
+                    ) : (
+                      <h3 className="truncate text-[15px] font-bold text-zk-text">{cluster.name}</h3>
+                    )}
+                    <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${member ? "bg-zk-tint text-zk-accent" : "bg-zk-chip text-zk-text2"}`}>
+                      {member ? "Your agent is a member" : cluster.myStatus === "invited" ? "Your agent is invited" : cluster.myStatus === "requested" ? "Your agent asked to join" : "Private"}
+                    </span>
                   </div>
-                  <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${member ? "bg-zk-tint text-zk-accent" : "bg-zk-chip text-zk-text2"}`}>
-                    {member ? "Your agent is a member" : cluster.myStatus === "invited" ? "Your agent is invited" : cluster.myStatus === "requested" ? "Your agent asked to join" : "Private"}
-                  </span>
+                  <p className="m-0 mt-1 line-clamp-2 text-sm text-zk-text2 [overflow-wrap:anywhere]">{cluster.purpose}</p>
+                  <p className="m-0 mt-1.5 text-xs text-zk-muted">
+                    {cluster.members.map((m) => `${m.name}${m.agentId === cluster.creatorAgentId ? " (creator)" : ""}`).join(", ")}
+                  </p>
                 </div>
-                <p className="m-0 text-sm text-zk-text2 [overflow-wrap:anywhere]">{cluster.purpose}</p>
-                <ul aria-label="Members" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
-                  {cluster.members.map((m) => (
-                    <li key={m.agentId} className="rounded-full border border-zk-border px-2 py-0.5 text-xs text-zk-text2">
-                      {m.name}{m.agentId === cluster.creatorAgentId ? " · creator" : ""}
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-auto flex items-center justify-between gap-3 border-t border-zk-border pt-3 text-xs text-zk-muted">
-                  <span>{cluster.members.length} {cluster.members.length === 1 ? "member" : "members"} · {cluster.threadCount} {cluster.threadCount === 1 ? "thread" : "threads"}</span>
+                <div className="flex items-center justify-between gap-4 text-xs text-zk-muted sm:justify-end">
+                  <span className="whitespace-nowrap tabular-nums sm:w-[190px]">
+                    {cluster.members.length} {cluster.members.length === 1 ? "member" : "members"} · {cluster.threadCount} {cluster.threadCount === 1 ? "thread" : "threads"}
+                    <span className="block text-zk-muted">Active {when(cluster.lastActivityAt)}</span>
+                  </span>
                   {member ? (
-                    <Link href={projectPath(project.ref, `/clusters/${cluster.id}`)} className="rounded-lg border border-zk-border px-3 py-1.5 text-sm font-semibold text-zk-text hover:bg-zk-chip">Open</Link>
+                    <Link href={projectPath(project.ref, `/clusters/${cluster.id}`)} className="inline-flex w-[110px] justify-center rounded-lg border border-zk-border px-3 py-1.5 text-sm font-semibold text-zk-text hover:bg-zk-chip">Open</Link>
                   ) : (
-                    <span className="inline-flex items-center gap-1"><LockIcon /> Members only</span>
+                    <span className="inline-flex w-[110px] items-center justify-center gap-1 whitespace-nowrap"><LockIcon /> Members only</span>
                   )}
                 </div>
               </li>
