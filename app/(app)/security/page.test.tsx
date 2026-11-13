@@ -5,6 +5,13 @@ import { currentOrganisationAccess } from "@/lib/organisation-access";
 import SecurityPage from "./page";
 import SecuritySettingsPage from "./settings/page";
 
+vi.mock("@/app/actions/security-assistant", () => ({ talkToSecurityAssistant: vi.fn() }));
+// The page reads the session to tell a signed-in person from a visitor (the public page); the real auth cannot load here.
+vi.mock("@/auth", () => ({ auth: vi.fn(async () => ({ user: { id: "user_test" } })) }));
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}));
 vi.mock("@/lib/auth-helpers", () => ({
   requireUser: vi.fn().mockResolvedValue({ id: "user_test_admin", role: "admin" }),
 }));
@@ -19,6 +26,7 @@ vi.mock("@/lib/organisation-access", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     securityCheck: { findMany: vi.fn().mockResolvedValue([]) },
+    securityCheckItem: { count: vi.fn().mockResolvedValue(0) },
     agentActivation: {
       findMany: vi.fn().mockResolvedValue([
         {
@@ -121,14 +129,15 @@ describe("SecurityPage (/security)", () => {
     expect(html).not.toContain('href="/issues/2829"');
   });
 
-  it("opens on Check a site, with the box closed and the findings one link away (#security-checks)", async () => {
+  it("opens on Your sites with the box, beside Your work, and Findings one icon away (#security-checks)", async () => {
     const markup = renderToStaticMarkup(await SecurityPage({}));
 
-    expect(markup).toContain("Check a site");
-    expect(markup).not.toContain('name="target"');
+    expect(markup).toContain("What do you want to secure?");
+    expect(markup).toContain('name="target"');
     expect(markup).toContain('href="/security?view=findings"');
     expect(markup).toContain('href="/security/work"');
     expect(markup).not.toContain('href="/security/activity"');
+    expect(markup).toContain(">Assets<");
     expect(markup).not.toContain("Open findings");
     expect(markup).not.toContain("Apply filters");
   });
@@ -139,7 +148,19 @@ describe("SecurityPage (/security)", () => {
     expect(markup).toContain("Open findings");
     expect(markup).toContain("Apply filters");
     expect(markup).toContain('name="view" value="findings"');
-    expect(markup).not.toContain("Check a site");
+    expect(markup).not.toContain("Add asset");
+  });
+
+  it("sends a member who is not an owner or admin to Your work instead of the assets", async () => {
+    vi.mocked(currentOrganisationAccess).mockResolvedValueOnce({
+      organisationId: "org_123",
+      organisationName: "Workspace",
+      organisationSlug: "workspace",
+      membershipRole: "member",
+      admin: false,
+    });
+
+    await expect(SecurityPage({})).rejects.toMatchObject({ digest: expect.stringContaining("/security/work") });
   });
 
   it("renders the Security settings gear link with its accessible name", async () => {
