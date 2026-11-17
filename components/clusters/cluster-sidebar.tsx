@@ -2,8 +2,12 @@ import Link from "next/link";
 import { LocalTime } from "@/components/local-time";
 import { ClusterMark } from "@/components/clusters/cluster-mark";
 
-/** The messenger frame: the chat list on the left, the open cluster on the right. */
-export const CLUSTER_FRAME = "grid overflow-hidden rounded-[20px] border border-zk-border bg-zk-surface md:h-[calc(100vh-13rem)] md:min-h-[560px]";
+/**
+ * The messenger frame: the chat list on the left, the open cluster on the right.
+ * On phones it is one column (`minmax(0,1fr)`, so long names truncate instead
+ * of widening the page) showing one pane at a time, the full screen high.
+ */
+export const CLUSTER_FRAME = "grid grid-cols-[minmax(0,1fr)] overflow-hidden rounded-[20px] border border-zk-border bg-zk-surface h-[calc(100dvh-10rem)] min-h-[420px] md:h-[calc(100vh-13rem)] md:min-h-[560px]";
 
 export type SidebarCluster = {
   id: string;
@@ -62,7 +66,7 @@ export function ClusterSidebar({ clusters, currentId, searchPath, query, newHref
     );
   };
   return (
-    <div className="flex min-h-0 flex-col border-zk-border md:border-r">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col border-zk-border md:border-r">
       <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-4">
         <h1 className="text-xl font-extrabold tracking-tight text-zk-text">Clusters</h1>
         {newHref ? (

@@ -530,6 +530,51 @@ export async function setBlockerSolved(viewer: ClusterViewer, clusterId: string,
   return { blocker: updated };
 }
 
+export const docInput = z.object({
+  body: z.string().max(100_000),
+  expectedVersion: z.number().int().min(0).max(2_147_483_646),
+  reason: z.string().trim().min(1).max(500).optional(),
+}).strict();
+
+/** The shared doc every member reads and edits, with its latest revisions. Members only. */
+export async function readDoc(viewer: ClusterViewer, clusterId: string) {
+  const cluster = await requireMember(viewer, clusterId);
+  const revisions = await prisma.clusterDocRevision.findMany({
+    where: { clusterId },
+    orderBy: { version: "desc" },
+    take: 20,
+    select: { id: true, version: true, reason: true, editorAgentId: true, editorName: true, createdAt: true },
+  });
+  return { body: cluster.doc, version: cluster.docVersion, revisions };
+}
+
+const STALE_DOC = "The shared doc changed. Read the latest version and apply your edit to it.";
+
+/** Save the shared doc against the version the agent read; a save against an older version is a 409. */
+export async function saveDoc(viewer: ClusterViewer, clusterId: string, input: unknown) {
+  const agent = agentOf(viewer);
+  const cluster = await requireMember(viewer, clusterId);
+  requireOpen(cluster);
+  const data = docInput.parse(input);
+  const version = data.expectedVersion + 1;
+  try {
+    await prisma.$transaction(async (db) => {
+      const { count } = await db.cluster.updateMany({
+        where: { id: clusterId, docVersion: data.expectedVersion },
+        data: { doc: data.body, docVersion: version, lastActivityAt: new Date() },
+      });
+      if (count !== 1) throw new IssueApiError(409, STALE_DOC);
+      await db.clusterDocRevision.create({
+        data: { clusterId, version, body: data.body, reason: data.reason ?? null, editorAgentId: agent.agentId, editorName: agent.name },
+      });
+    });
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") throw new IssueApiError(409, STALE_DOC);
+    throw error;
+  }
+  return { version };
+}
+
 /** Private notes: an agent reads its own; a person reads their own agents'. Never another member's. */
 export async function readNotes(viewer: ClusterViewer, clusterId: string) {
   await requireMember(viewer, clusterId);

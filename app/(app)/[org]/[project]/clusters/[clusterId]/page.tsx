@@ -9,11 +9,11 @@ import { ClusterMark } from "@/components/clusters/cluster-mark";
 import { CLUSTER_FRAME, ClusterSidebar } from "@/components/clusters/cluster-sidebar";
 import { agentsDangerBtn, agentsMutedClass, agentsPrimaryBtn, agentsSecondaryBtn } from "@/app/(app)/settings/agents/agents-ui";
 import {
-  INACTIVE_DAYS, getClusterCard, listClusters, listPending, listTasks, ownAgentsIn, readNotes, suggestInvites, type ClusterViewer,
+  INACTIVE_DAYS, getClusterCard, listClusters, listPending, listTasks, ownAgentsIn, readDoc, readNotes, suggestInvites, type ClusterViewer,
 } from "@/lib/clusters";
 import {
   addBlockerAction, addTaskAction, deleteClusterAction, inviteAction, joinClusterAction, leaveClusterAction, removeMemberAction,
-  saveNoteAction, shareAction, solveBlockerAction,
+  saveDocAction, saveNoteAction, shareAction, solveBlockerAction,
 } from "../actions";
 
 export const metadata = { title: "Cluster" };
@@ -28,13 +28,16 @@ const PANEL_TITLE = "m-0 text-[11px] font-bold uppercase tracking-wide text-zk-m
  * messenger layout. Left: the workspace's clusters. Middle: the cluster's header
  * and its tasks as a conversation (each task says what its agent is trying to
  * achieve and what blocks it; members reply with what they know), with a bar to
- * post a task. `?info=1` opens the group info panel on the right (members,
- * invites, private notes, leave or delete). Non-members see the cluster's card
- * and Join or Accept instead of its tasks.
+ * post a task. Tabs switch the middle to the cluster's shared doc (`?view=doc`,
+ * which every member reads and edits, with its revisions) or your agent's
+ * private doc (`?view=private`, which only you and your agent read).
+ * `?info=1` opens the group info panel (members, invites, leave or delete).
+ * Non-members see the cluster's card and Join or Accept instead of its tasks.
+ * On phones the list, the chat and group info each take the whole screen.
  */
 export default async function ClusterPage({ params, searchParams }: {
   params: Promise<{ org: string; project: string; clusterId: string }>;
-  searchParams: Promise<{ error?: string; info?: string; q?: string }>;
+  searchParams: Promise<{ error?: string; info?: string; q?: string; view?: string }>;
 }) {
   const { org, project: slugParam, clusterId } = await params;
   const query = await searchParams;
@@ -52,6 +55,8 @@ export default async function ClusterPage({ params, searchParams }: {
   const listPath = projectPath(project.ref, "/clusters");
   const here = projectPath(project.ref, `/clusters/${clusterId}`);
   const showInfo = query.info === "1";
+  const view = query.view === "doc" || query.view === "private" ? query.view : "tasks";
+  const viewPath = view === "tasks" ? here : `${here}?view=${view}`;
   const member = cluster.myStatus === "active";
   const [{ items }, myAgents] = await Promise.all([
     listClusters(viewer, { wholeOrganisation: true, query: query.q }),
@@ -62,12 +67,15 @@ export default async function ClusterPage({ params, searchParams }: {
   const acting = myAgents.find((a) => a.id === cluster.creatorAgentId) ?? myAgents.find((a) => memberIds.has(a.id)) ?? null;
   const isOwner = acting?.id === cluster.creatorAgentId;
   const owner = cluster.members.find((m) => m.agentId === cluster.creatorAgentId)?.name;
-  const [tasks, notes, pending, suggestions] = member && acting
+  const [tasks, notes, pending, suggestions, doc] = member && acting
     ? await Promise.all([
       listTasks(viewer, clusterId), readNotes(viewer, clusterId), listPending(viewer, clusterId),
       suggestInvites(viewer, clusterId).catch(() => ({ missingSkills: [], items: [] })),
+      readDoc(viewer, clusterId),
     ])
-    : [null, null, null, null];
+    : [null, null, null, null, null];
+  const myNote = notes && acting ? notes.items.find((n) => n.agentId === acting.id) ?? null : null;
+  const lastEdit = doc?.revisions[0] ?? null;
   // Who would join: the invited agent of yours, else your first agent with a needed skill.
   const invite = cluster.myStatus === "invited"
     ? await prisma.clusterMember.findFirst({ where: { clusterId, status: "invited", agent: { ownerUserId: user.id } }, select: { agentId: true } })
@@ -91,24 +99,31 @@ export default async function ClusterPage({ params, searchParams }: {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-3 caret-transparent [&_input]:[caret-color:auto] [&_textarea]:[caret-color:auto]">
       {query.error ? <p role="alert" className="rounded-[20px] border border-zk-bad-bd bg-zk-bad-bg px-4 py-3 text-sm text-zk-bad-fg">{query.error}</p> : null}
-      <div className={`${CLUSTER_FRAME} ${showInfo && member ? "md:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)_18rem]" : "md:grid-cols-[22rem_minmax(0,1fr)]"}`}>
+      {/* Phones: one pane at a time (the chat, or group info); the list is its own page. */}
+      <div className={`${CLUSTER_FRAME} ${showInfo && member ? "md:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[20rem_minmax(0,1fr)_18rem]" : "md:grid-cols-[22rem_minmax(0,1fr)]"}`}>
         <div className={showInfo && member ? "hidden xl:flex xl:min-h-0 xl:flex-col" : "hidden md:flex md:min-h-0 md:flex-col"}>
           <ClusterSidebar clusters={items} currentId={clusterId} searchPath={here} query={query.q} newHref={myAgents.length ? `${listPath}?new=1` : null} />
         </div>
 
-        <section aria-label={cluster.name} className="flex min-h-0 flex-col">
+        <section aria-label={cluster.name} className={`${showInfo && member ? "hidden md:flex" : "flex"} min-h-0 min-w-0 flex-col`}>
           {/* Header bar, as an open chat's: back on phones, the cluster, and its info. */}
-          <header className="flex items-center gap-3 border-b border-zk-border bg-zk-surface px-4 py-3">
-            <Link href={listPath} className={`md:hidden ${NOFOCUS} text-zk-muted`} aria-label="All clusters">←</Link>
+          <header className="flex min-w-0 items-center gap-2 border-b border-zk-border bg-zk-surface px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
+            <Link href={listPath} className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-zk-muted hover:bg-zk-chip md:hidden ${NOFOCUS}`} aria-label="All clusters">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+            </Link>
             <ClusterMark name={cluster.name} size={40} />
             <div className="min-w-0 flex-1">
               <p className="m-0 truncate text-[15px] font-extrabold text-zk-text">{cluster.name}</p>
               <p className="m-0 truncate text-xs text-zk-muted">
-                {cluster.project.name} · {cluster.members.length} {cluster.members.length === 1 ? "member" : "members"} · {cluster.neededSkills.join(", ")}
+                {cluster.project.name} · {cluster.members.length} {cluster.members.length === 1 ? "member" : "members"}
+                <span className="hidden sm:inline"> · {cluster.neededSkills.join(", ")}</span>
               </p>
             </div>
             {member ? (
-              <Link href={showInfo ? here : `${here}?info=1`} className={`${agentsSecondaryBtn} min-h-9 px-4 ${NOFOCUS}`}>{showInfo ? "Close info" : "Group info"}</Link>
+              <Link href={showInfo ? viewPath : `${viewPath}${view === "tasks" ? "?" : "&"}info=1`} title="Group info" aria-label={showInfo ? "Close group info" : "Group info"} className={`${agentsSecondaryBtn} min-h-9 shrink-0 px-2.5 sm:px-4 ${NOFOCUS}`}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="sm:hidden" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+                <span className="hidden sm:inline">{showInfo ? "Close info" : "Group info"}</span>
+              </Link>
             ) : null}
             {/* Close the chat: back to the list with nothing open, as in a messenger. */}
             <Link href={listPath} title="Close chat" aria-label="Close chat" className={`hidden h-9 w-9 shrink-0 place-items-center rounded-full text-zk-muted hover:bg-zk-chip hover:text-zk-text md:grid ${NOFOCUS}`}>
@@ -116,14 +131,87 @@ export default async function ClusterPage({ params, searchParams }: {
             </Link>
           </header>
 
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-zk-bg/40 px-4 py-4 sm:px-6">
-            <div className="mx-auto max-w-xl rounded-2xl bg-zk-surface px-4 py-3 text-center text-xs text-zk-muted shadow-[0_1px_2px_rgba(11,23,51,0.06)]">
-              {owner ? `${owner} created this cluster. ` : ""}{cluster.purpose}
-              {cluster.missingSkills.length ? <> Still looking for: <b className="text-zk-accent">{cluster.missingSkills.join(", ")}</b>.</> : null}
-              {cluster.archived ? <> Archived after {INACTIVE_DAYS} days without activity.</> : null}
-            </div>
+          {member && acting ? (
+            <nav aria-label="Cluster views" className="flex shrink-0 gap-1 overflow-x-auto border-b border-zk-border bg-zk-surface px-2 [scrollbar-width:none] sm:px-3 [&::-webkit-scrollbar]:hidden">
+              {([["tasks", "Tasks", here], ["doc", "Shared doc", `${here}?view=doc`], ["private", "Private doc", `${here}?view=private`]] as const).map(([key, label, href]) => (
+                <Link
+                  key={key}
+                  href={showInfo ? `${href}${key === "tasks" ? "?" : "&"}info=1` : href}
+                  aria-current={view === key ? "page" : undefined}
+                  className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-bold ${NOFOCUS} ${view === key ? "border-electric-blue text-zk-accent" : "border-transparent text-zk-muted hover:text-zk-text"}`}
+                >
+                  {label}
+                </Link>
+              ))}
+            </nav>
+          ) : null}
 
-            {!member || !acting || !tasks ? (
+          <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto bg-zk-bg/40 px-3 py-4 sm:px-6">
+            {view === "tasks" || !member ? (
+              <div className="mx-auto max-w-xl rounded-2xl bg-zk-surface px-4 py-3 text-center text-xs text-zk-muted shadow-[0_1px_2px_rgba(11,23,51,0.06)] [overflow-wrap:anywhere]">
+                {owner ? `${owner} created this cluster. ` : ""}{cluster.purpose}
+                {cluster.missingSkills.length ? <> Still looking for: <b className="text-zk-accent">{cluster.missingSkills.join(", ")}</b>.</> : null}
+                {cluster.archived ? <> Archived after {INACTIVE_DAYS} days without activity.</> : null}
+              </div>
+            ) : null}
+
+            {member && acting && view === "doc" && doc ? (
+              <div className="mx-auto max-w-3xl space-y-3">
+                <div className="space-y-3 rounded-2xl bg-zk-surface p-4 shadow-[0_1px_2px_rgba(11,23,51,0.08)] sm:p-5">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                    <h2 className="m-0 text-base font-extrabold text-zk-text">Shared doc</h2>
+                    <p className="m-0 text-xs text-zk-muted">
+                      {lastEdit ? <>Version {doc.version} · {lastEdit.editorName} · <LocalTime date={lastEdit.createdAt} /></> : "Not written yet"}
+                    </p>
+                  </div>
+                  <p className="m-0 text-xs text-zk-muted">What the cluster knows. Every member reads it and can edit it.</p>
+                  {doc.body ? (
+                    <div className="whitespace-pre-wrap rounded-xl border border-zk-border bg-zk-bg/40 p-3 text-sm text-zk-text2 [overflow-wrap:anywhere]">{doc.body}</div>
+                  ) : (
+                    <p className={`${agentsMutedClass} m-0`}>Nothing here yet. Write what every member should know: decisions, links, how things work.</p>
+                  )}
+                  {open ? (
+                    <details className="group" open={!doc.body}>
+                      <summary className={`${agentsSecondaryBtn} min-h-9 w-fit cursor-pointer list-none px-4 ${NOFOCUS} [&::-webkit-details-marker]:hidden`}>Edit shared doc</summary>
+                      <form action={saveDocAction} className="mt-3 grid gap-2">
+                        {hidden({ back: `${here}?view=doc`, expectedVersion: String(doc.version) })}
+                        <textarea name="body" rows={10} maxLength={100_000} defaultValue={doc.body} placeholder="Write the shared doc" className={INPUT} />
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <input name="reason" maxLength={500} placeholder="What changed? (optional)" className={`${INPUT} min-w-0 flex-1`} />
+                          <button type="submit" className={`${agentsPrimaryBtn} shrink-0 ${NOFOCUS}`}>Save as {acting.name}</button>
+                        </div>
+                        <p className="m-0 text-xs text-zk-muted">If someone saved a newer version first, yours is refused so nothing is overwritten: reload and edit again.</p>
+                      </form>
+                    </details>
+                  ) : null}
+                </div>
+                {doc.revisions.length ? (
+                  <div className="space-y-2 rounded-2xl bg-zk-surface p-4 shadow-[0_1px_2px_rgba(11,23,51,0.08)] sm:p-5">
+                    <p className={PANEL_TITLE}>History</p>
+                    <ul className="m-0 grid list-none gap-1.5 p-0">
+                      {doc.revisions.slice(0, 8).map((r) => (
+                        <li key={r.id} className="text-xs text-zk-text2 [overflow-wrap:anywhere]">
+                          <b className="font-bold text-zk-text">v{r.version}</b> · {r.editorName} · <LocalTime date={r.createdAt} />{r.reason ? <> · {r.reason}</> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : member && acting && view === "private" ? (
+              <div className="mx-auto max-w-3xl space-y-3 rounded-2xl bg-zk-surface p-4 shadow-[0_1px_2px_rgba(11,23,51,0.08)] sm:p-5">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <h2 className="m-0 text-base font-extrabold text-zk-text">Private doc</h2>
+                  {myNote ? <p className="m-0 text-xs text-zk-muted">Saved <LocalTime date={myNote.updatedAt} /></p> : null}
+                </div>
+                <p className="m-0 text-xs text-zk-muted">{acting.name}&apos;s own notes in this cluster. Only you and your agent can read them; other members never see them.</p>
+                <form action={saveNoteAction} className="grid gap-2">
+                  {hidden({ back: `${here}?view=private` })}
+                  <textarea name="body" rows={12} maxLength={20_000} defaultValue={myNote?.body ?? ""} placeholder={`Private notes for ${acting.name}`} className={INPUT} />
+                  <div><button type="submit" className={`${agentsPrimaryBtn} ${NOFOCUS}`}>Save private doc</button></div>
+                </form>
+              </div>
+            ) : !member || !acting || !tasks ? (
               <div className="mx-auto max-w-md space-y-3 rounded-2xl bg-zk-surface p-6 text-center shadow-[0_1px_2px_rgba(11,23,51,0.06)]">
                 <p className="m-0 text-sm font-bold text-zk-text">Only members see this cluster&apos;s tasks.</p>
                 {invitedAgent && open ? (
@@ -190,7 +278,7 @@ export default async function ClusterPage({ params, searchParams }: {
                           <textarea name="body" required rows={2} placeholder="Share what you know" className={INPUT} />
                           <div className="flex flex-wrap items-center gap-2">
                             {openBlockers.length ? (
-                              <select name="blockerId" defaultValue="" className={`${INPUT} w-auto min-w-0 flex-1`}>
+                              <select name="blockerId" defaultValue="" className={`${INPUT} w-auto min-w-0 max-w-full flex-1`}>
                                 <option value="">General reply</option>
                                 {openBlockers.map((blocker) => <option key={blocker.id} value={blocker.id}>Answers: {blocker.text}</option>)}
                               </select>
@@ -213,10 +301,10 @@ export default async function ClusterPage({ params, searchParams }: {
             )}
           </div>
 
-          {member && acting && open ? (
-            <details className="group border-t border-zk-border bg-zk-surface">
+          {member && acting && open && view === "tasks" ? (
+            <details className="group shrink-0 border-t border-zk-border bg-zk-surface">
               <summary className={`flex cursor-pointer list-none items-center gap-3 px-4 py-3 ${NOFOCUS} [&::-webkit-details-marker]:hidden`}>
-                <span className="flex-1 rounded-full border border-zk-border bg-zk-chip/50 px-4 py-2.5 text-sm text-zk-muted">Post a task as {acting.name}…</span>
+                <span className="min-w-0 flex-1 truncate rounded-full border border-zk-border bg-zk-chip/50 px-4 py-2.5 text-sm text-zk-muted">Post a task as {acting.name}…</span>
                 <span className="grid h-10 w-10 place-items-center rounded-full bg-electric-blue-strong text-white" aria-hidden="true">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
                 </span>
@@ -227,7 +315,7 @@ export default async function ClusterPage({ params, searchParams }: {
                 <textarea name="tryingToAchieve" required minLength={3} rows={2} placeholder="What are you trying to achieve?" className={INPUT} />
                 <textarea name="blockers" rows={2} placeholder="What is blocking you? One per line." className={INPUT} />
                 <div className="flex flex-wrap items-center gap-2">
-                  <input name="issueNumber" type="number" min={1} placeholder="Issue # (optional)" className={`${INPUT} w-44`} />
+                  <input name="issueNumber" type="number" min={1} placeholder="Issue # (optional)" className={`${INPUT} w-40`} />
                   <span className="flex-1" />
                   <button type="submit" className={`${agentsPrimaryBtn} ${NOFOCUS}`}>Post task</button>
                 </div>
@@ -236,8 +324,14 @@ export default async function ClusterPage({ params, searchParams }: {
           ) : null}
         </section>
 
-        {showInfo && member && acting && pending && suggestions && notes ? (
-          <aside aria-label="Group info" className="flex min-h-0 flex-col overflow-y-auto border-t border-zk-border md:col-span-2 xl:col-span-1 xl:border-l xl:border-t-0">
+        {showInfo && member && acting && pending && suggestions ? (
+          <aside aria-label="Group info" className="flex min-h-0 min-w-0 flex-col overflow-y-auto border-zk-border md:border-l">
+            <div className="flex items-center gap-2 border-b border-zk-border px-3 py-2.5 md:hidden">
+              <Link href={viewPath} className={`grid h-9 w-9 place-items-center rounded-full text-zk-muted hover:bg-zk-chip ${NOFOCUS}`} aria-label="Back to the chat">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+              </Link>
+              <p className="m-0 text-[15px] font-extrabold text-zk-text">Group info</p>
+            </div>
             <div className="space-y-2 border-b border-zk-border p-5 text-center">
               <div className="flex justify-center"><ClusterMark name={cluster.name} size={72} /></div>
               <p className="m-0 text-base font-extrabold text-zk-text">{cluster.name}</p>
@@ -288,20 +382,6 @@ export default async function ClusterPage({ params, searchParams }: {
                   <button type="submit" className={`${agentsSecondaryBtn} w-full min-h-9 ${NOFOCUS}`}>Invite</button>
                 </form>
               ) : null}
-            </div>
-            <div className="border-b border-zk-border p-5">
-              <details className="group">
-                <summary className={`flex cursor-pointer list-none items-center justify-between ${NOFOCUS} [&::-webkit-details-marker]:hidden`}>
-                  <span className={PANEL_TITLE}>Private notes</span>
-                  <span className="text-xs font-bold text-zk-accent">{notes.items.length ? "Show" : "Add"}</span>
-                </summary>
-                <p className="mt-2 text-xs text-zk-muted">Only your agent and you can read these.</p>
-                <form action={saveNoteAction} className="mt-2 grid gap-2">
-                  {hidden({ back: `${here}?info=1` })}
-                  <textarea name="body" rows={4} defaultValue={notes.items.find((n) => n.agentId === acting.id)?.body ?? ""} placeholder={`Notes for ${acting.name}`} className={INPUT} />
-                  <button type="submit" className={`${agentsSecondaryBtn} w-full min-h-9 ${NOFOCUS}`}>Save notes</button>
-                </form>
-              </details>
             </div>
             <div className="space-y-2 p-5">
               {isOwner ? (

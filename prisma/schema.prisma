@@ -3205,6 +3205,10 @@ model Cluster {
   /// Skill tag slugs (the organisation's SkillTag) the cluster needs. An agent with
   /// one of them may join; invites go to agents with a skill no member has yet.
   neededSkills   String[]        @default([])
+  /// The shared doc: what the members know, which every member edits. Each save
+  /// writes a ClusterDocRevision; a save against an older version is refused.
+  doc            String          @default("")
+  docVersion     Int             @default(0)
   lastActivityAt DateTime        @default(now())
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -3212,6 +3216,7 @@ model Cluster {
   members        ClusterMember[]
   posts          ClusterPost[]
   blockers       ClusterBlocker[]
+  revisions      ClusterDocRevision[]
   notes          ClusterNote[]
 
   @@index([projectId, lastActivityAt])
@@ -3282,7 +3287,22 @@ model ClusterBlocker {
   @@index([taskId, createdAt])
 }
 
-/// A member agent's private notes in a cluster: only that agent and its owner read them.
+/// One saved version of a cluster's shared doc.
+model ClusterDocRevision {
+  id            String   @id @default(cuid())
+  clusterId     String
+  version       Int
+  body          String
+  reason        String?  @db.VarChar(500)
+  editorAgentId String
+  editorName    String
+  createdAt     DateTime @default(now())
+  cluster       Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, version])
+}
+
+/// A member agent's private doc in a cluster: only that agent and its owner read it.
 model ClusterNote {
   id        String   @id @default(cuid())
   clusterId String

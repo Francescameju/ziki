@@ -15,12 +15,13 @@ const db = vi.hoisted(() => ({
   clusterPost: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
   clusterBlocker: { findFirst: vi.fn(), create: vi.fn(), createMany: vi.fn(), update: vi.fn() },
   clusterNote: { findMany: vi.fn(), upsert: vi.fn() },
+  clusterDocRevision: { findMany: vi.fn(), create: vi.fn() },
   $transaction: vi.fn(),
 }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 import {
   agentClusterViewer, addBlocker, addTask, createCluster, decideMember, deleteCluster, ownerActingAgent, inviteToCluster, joinCluster,
-  listClusters, listTasks, readNotes, reopenCluster, setBlockerSolved, shareInformation, suggestInvites, type ClusterViewer,
+  listClusters, listTasks, readDoc, readNotes, saveDoc, reopenCluster, setBlockerSolved, shareInformation, suggestInvites, type ClusterViewer,
 } from "@/lib/clusters";
 import type { AgentContext } from "@/lib/agents/require-agent";
 
@@ -270,5 +271,42 @@ describe("tasks, blockers and shared information", () => {
   it("lets no one but an agent write", async () => {
     db.clusterMember.findFirst.mockResolvedValue({ agentId: "member" });
     await expect(addTask({ organisationId: "org", projectId: "project", userId: "owner-member" }, "c1", { title: "Hi", tryingToAchieve: "Hello" })).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe("the shared doc", () => {
+  it("is for members only: an outsider gets the same 404 as a missing cluster", async () => {
+    await expect(readDoc(viewerFor("outsider"), "c1")).rejects.toMatchObject({ status: 404, message: "Cluster not found." });
+    await expect(saveDoc(viewerFor("outsider"), "c1", { body: "x", expectedVersion: 3 })).rejects.toMatchObject({ status: 404 });
+    expect(db.cluster.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns the body, its version and the latest revisions to a member", async () => {
+    db.clusterDocRevision.findMany.mockResolvedValue([{ id: "r3", version: 3, editorName: "Agent creator" }]);
+    const doc = await readDoc(viewerFor("member"), "c1");
+    expect(doc).toMatchObject({ body: "Plan", version: 3, revisions: [{ version: 3 }] });
+  });
+
+  it("saves against the version read and records a revision", async () => {
+    db.cluster.updateMany.mockResolvedValue({ count: 1 });
+    await expect(saveDoc(viewerFor("member"), "c1", { body: "Plan v2", expectedVersion: 3, reason: "Add rollout" })).resolves.toEqual({ version: 4 });
+    expect(db.cluster.updateMany.mock.calls[0][0]).toMatchObject({ where: { id: "c1", docVersion: 3 }, data: { doc: "Plan v2", docVersion: 4 } });
+    expect(db.clusterDocRevision.create.mock.calls[0][0].data).toMatchObject({ clusterId: "c1", version: 4, body: "Plan v2", reason: "Add rollout", editorAgentId: "member" });
+  });
+
+  it("refuses a save against an older version with 409, so no edit is lost", async () => {
+    db.cluster.updateMany.mockResolvedValue({ count: 0 });
+    await expect(saveDoc(viewerFor("member"), "c1", { body: "stale", expectedVersion: 2 })).rejects.toMatchObject({ status: 409 });
+    expect(db.clusterDocRevision.create).not.toHaveBeenCalled();
+  });
+
+  it("is read-only while the cluster is archived", async () => {
+    db.cluster.findFirst.mockResolvedValue({ ...cluster, lastActivityAt: new Date(Date.now() - 20 * DAY) });
+    await expect(saveDoc(viewerFor("member"), "c1", { body: "x", expectedVersion: 3 })).rejects.toMatchObject({ status: 409 });
+    expect(db.cluster.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("is edited by agents, not by a person's session", async () => {
+    await expect(saveDoc({ organisationId: "org", projectId: "project", userId: "owner-member" }, "c1", { body: "x", expectedVersion: 3 })).rejects.toMatchObject({ status: 403 });
   });
 });

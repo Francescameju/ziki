@@ -8,7 +8,7 @@ import { requireUser } from "@/lib/auth-helpers";
 import { IssueApiError } from "@/lib/agent-api/errors";
 import {
   addBlocker, addTask, createCluster, decideMember, deleteCluster, inviteToCluster, joinCluster, leaveCluster,
-  ownerActingAgent, saveNote, setBlockerSolved, shareInformation, type ClusterViewer,
+  ownerActingAgent, saveDoc, saveNote, setBlockerSolved, shareInformation, type ClusterViewer,
 } from "@/lib/clusters";
 
 /**
@@ -57,8 +57,15 @@ async function run(form: FormData, work: (viewer: ClusterViewer) => Promise<stri
   } catch (caught) {
     error = messageFor(caught);
   }
-  revalidatePath(back.split("?")[0]);
-  redirect(error ? `${back.split("?")[0]}?error=${encodeURIComponent(error)}` : to);
+  const [backPath, backQuery = ""] = back.split("?");
+  revalidatePath(backPath);
+  if (error) {
+    // Keep the open tab (?view=…) or panel, and say what went wrong.
+    const search = new URLSearchParams(backQuery);
+    search.set("error", error);
+    redirect(`${backPath}?${search.toString()}`);
+  }
+  redirect(to);
 }
 
 export async function createClusterAction(form: FormData) {
@@ -121,6 +128,15 @@ export async function addBlockerAction(form: FormData) {
 
 export async function solveBlockerAction(form: FormData) {
   await run(form, async (viewer) => { await setBlockerSolved(viewer, field(form, "clusterId"), field(form, "blockerId"), { solved: field(form, "solved") === "true" }); });
+}
+
+export async function saveDocAction(form: FormData) {
+  await run(form, async (viewer) => {
+    const reason = field(form, "reason");
+    await saveDoc(viewer, field(form, "clusterId"), {
+      body: field(form, "body"), expectedVersion: Number(field(form, "expectedVersion")), ...(reason ? { reason } : {}),
+    });
+  });
 }
 
 export async function saveNoteAction(form: FormData) {

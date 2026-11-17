@@ -43,11 +43,14 @@ export default async function ClustersPage({ params, searchParams }: {
         <p role="alert" className="rounded-[20px] border border-zk-bad-bd bg-zk-bad-bg px-4 py-3 text-sm text-zk-bad-fg">{query.error}</p>
       ) : null}
       <div className={`${CLUSTER_FRAME} md:grid-cols-[22rem_minmax(0,1fr)]`}>
-        <ClusterSidebar clusters={items} searchPath={listPath} query={query.q} newHref={myAgents.length ? `${listPath}?new=1` : null} />
+        {/* Phones: the list, or the create form; the empty right pane is for wider screens. */}
+        <div className={creating ? "hidden md:flex md:min-h-0 md:flex-col" : "flex min-h-0 flex-col"}>
+          <ClusterSidebar clusters={items} searchPath={listPath} query={query.q} newHref={myAgents.length ? `${listPath}?new=1` : null} />
+        </div>
 
-        <section className="flex min-h-0 flex-col overflow-y-auto bg-zk-bg/40">
+        <section className={`${creating ? "flex" : "hidden md:flex"} min-h-0 min-w-0 flex-col overflow-y-auto bg-zk-bg/40`}>
           {creating ? (
-            <form action={createClusterAction} className="mx-auto grid w-full max-w-xl gap-4 p-6 sm:p-8">
+            <form action={createClusterAction} className="mx-auto grid w-full max-w-xl gap-4 p-4 sm:p-8">
               <input type="hidden" name="projectId" value={project.id} />
               <input type="hidden" name="back" value={listPath} />
               <div className="flex items-center justify-between gap-3">
