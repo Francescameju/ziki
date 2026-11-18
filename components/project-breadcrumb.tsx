@@ -76,7 +76,7 @@ function sectionOf(pathname: string, ref: ProjectRef): Crumb[] {
     if (second) return [{ label: "Forum", href: projectPath(ref, "/forum") }, { label: "Discussion" }];
     return named("Forum");
   }
-  const pages: Record<string, string> = { forum: "Forum", notes: "Notes", design: "Design", org: "Organisation", workstream: "Workstream", agents: "Active agents", report: "Report an issue" };
+  const pages: Record<string, string> = { forum: "Forum", notes: "Notes", design: "Design", org: "Organisation", workstream: "Workstream", agents: "Active agents", report: "Report an issue", clusters: "Clusters" };
   return pages[first] ? named(pages[first]) : [];
 }
 
@@ -112,6 +112,9 @@ export function ProjectBreadcrumb({ project }: { project: BreadcrumbProject }) {
   const onProjects = !ref;
   const section = ref ? sectionOf(pathname, ref) : [];
   const width = ref && narrowPage(pathname, ref) ? "max-w-[920px]" : "max-w-6xl";
+  // Agent clusters (#agent-clusters): wide screens reach them from the Agents panel, which phones and tablets don't have.
+  const clustersHref = ref ? projectPath(ref, "/clusters") : null;
+  const inClusters = Boolean(clustersHref && (pathname === clustersHref || pathname.startsWith(`${clustersHref}/`)));
   return (
     <nav aria-label="Breadcrumb" className={`mx-auto mb-3 flex w-full ${width} items-center px-0.5 text-[13px] text-zk-text2 max-sm:mb-1`}>
       <ol className="flex min-w-0 flex-wrap items-center gap-0.5">
@@ -142,6 +145,17 @@ export function ProjectBreadcrumb({ project }: { project: BreadcrumbProject }) {
           </>
         )}
       </ol>
+      {clustersHref && !inClusters ? (
+        <Link
+          href={clustersHref}
+          className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-zk-border bg-zk-surface px-3 py-1 text-xs font-bold text-zk-text hover:bg-zk-chip focus-visible:outline-2 focus-visible:outline-zk-accent lg:hidden"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="6" cy="7" r="2.5" /><circle cx="18" cy="6.5" r="2.5" /><circle cx="12" cy="18" r="2.5" /><path d="M8.5 7l7-.4M7.2 9.2l3.6 6.6M16.8 8.8l-3.6 7" />
+          </svg>
+          Clusters
+        </Link>
+      ) : null}
     </nav>
   );
 }
